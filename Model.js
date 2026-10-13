@@ -1,5 +1,20 @@
 .pragma library
 
+// What the On slider covers. hyprsunset goes lower than this is useful and far
+// higher; 6500K is the untinted end, past which the screen only turns blue.
+var TEMP_MIN = 1000
+var TEMP_MAX = 6500
+var TEMP_SNAP = 50
+var TEMP_STEP = 100
+
+function clampTemp(kelvin) {
+  return Math.max(TEMP_MIN, Math.min(TEMP_MAX, kelvin))
+}
+
+function snapTemp(kelvin) {
+  return clampTemp(Math.round(kelvin / TEMP_SNAP) * TEMP_SNAP)
+}
+
 function emptyStatus() {
   return {
     ok: false,
@@ -11,7 +26,6 @@ function emptyStatus() {
     sunset: "",
     estimated: false,
     running: false,
-    paused: false,
     mode: "auto",
     daytime: false,
     generated: false,
@@ -24,7 +38,8 @@ function emptyStatus() {
     dayTemp: null,
     eveningTemp: 0,
     nightTemp: 0,
-    steps: []
+    manualTemp: 0,
+    ladder: ({})
   }
 }
 
@@ -42,7 +57,6 @@ function parseStatus(raw) {
     s.sunset = String(data.sunset || "")
     s.estimated = data.estimated === true
     s.running = data.running === true
-    s.paused = data.paused === true
     s.mode = (data.mode === "on" || data.mode === "off") ? data.mode : "auto"
     s.daytime = data.daytime === true
     s.generated = data.generated === true
@@ -55,6 +69,8 @@ function parseStatus(raw) {
     s.dayTemp = normaliseTemp(data.day_temp)
     s.eveningTemp = Number(data.evening_temp) || 0
     s.nightTemp = Number(data.night_temp) || 0
+    s.manualTemp = Number(data.manual_temp) || s.nightTemp
+    s.ladder = (data.ladder && typeof data.ladder === "object") ? data.ladder : ({})
     return s
   } catch (e) {
     return emptyStatus()
@@ -64,26 +80,6 @@ function parseStatus(raw) {
 // null is meaningful: it is the untinted day profile, not a missing value.
 function normaliseTemp(value) {
   return (value === null || value === undefined) ? null : Number(value)
-}
-
-function parseSteps(raw) {
-  var out = []
-  var lines = String(raw || "").split("\n")
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim()
-    if (!line || line.charAt(0) === "#") continue
-    // "Fri 17:30   5000K"  or  "Sat 06:13   day"
-    var parts = line.split(/\s+/)
-    if (parts.length < 3) continue
-    var value = parts[2]
-    out.push({
-      day: parts[0],
-      time: parts[1],
-      temperature: value === "day" ? null : Number(value.replace("K", "")),
-      label: value === "day" ? "off" : value
-    })
-  }
-  return out
 }
 
 function tempLabel(temp) {
@@ -146,9 +142,9 @@ function locationLabel(status) {
 }
 
 function summaryLine(status) {
-  if (!status.ok) return "Sunset Night Light"
+  if (!status.ok) return "Night Light"
   if (status.mode === "off") return "Night light off (manual) · click to open"
-  if (status.mode === "on") return "Night light on (manual) · " + tempLabel(status.nightTemp)
+  if (status.mode === "on") return "Night light on (manual) · " + tempLabel(status.manualTemp)
   if (!status.running) return "hyprsunset is not running"
   var now = tempLabel(status.scheduledTemperature)
   if (status.nextAt) return now + " · " + tempLabel(status.nextTemperature) + " at " + status.nextAt
@@ -210,7 +206,6 @@ function heroMeta(status, tinted, temperature) {
 }
 
 function modeCaption(mode, status) {
-  if (mode === "on") return "Held at " + tempLabel(status.nightTemp) + " around the clock."
   if (mode === "off") return "Held untinted around the clock."
   return "Warms at dusk, clears at sunrise."
 }

@@ -4,27 +4,29 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Bar widget for nightlight-auto. All state comes from the CLI in bin/, which
+// Bar widget for Night Light. All state comes from the CLI in bin/, which
 // is the same thing the systemd timer drives -- the widget never computes a
 // schedule of its own, so what it shows is always what is actually loaded.
 //
 // The panel reads top to bottom in the order someone opening it needs things:
 //   hero     what the screen is doing right now, and what happens next
-//   mode     the one decision made here: Auto, On or Off
+//   mode     the one decision made here: Auto, On or Off -- and, for On,
+//            how warm
 //   tonight  the whole ladder as one strip, and when each phase runs
 //   footer   where the sun times come from, and a rebuild action
 Panel {
   id: root
-  moduleName: "contra.nightlight"
-  ipcTarget: "contra.nightlight"
+  moduleName: "sviat.nightlight"
+  ipcTarget: "sviat.nightlight"
   manageIpc: false
 
   // One singleton owns the state; this widget is instantiated once per monitor
   // and only reads from it. See Service.qml.
-  readonly property var service: bar?.shell?.serviceFor("contra.nightlight")
+  readonly property var service: bar?.shell?.serviceFor("sviat.nightlight")
   readonly property var status: service ? service.status : Model.emptyStatus()
   readonly property var steps: service ? service.steps : []
   readonly property var ladder: service ? service.ladder : ({})
+  readonly property int manualTemp: service ? service.manualTemp : 0
   readonly property bool busy: service ? service.busy : false
   readonly property string stage: service ? service.stage : "day"
   readonly property bool isSetup: service ? service.isSetup : false
@@ -69,10 +71,14 @@ Panel {
     if (root.modeCursor >= 0) root.setMode(root.modes[root.modeCursor].value)
   }
 
+  function nudgeTemp(delta) {
+    if (root.service && root.mode === "on") root.service.nudgeTemp(delta)
+  }
+
   // No IpcHandler here on purpose: Service.qml already claims the
-  // "contra.nightlight" target, and two handlers cannot share one. The panel
+  // "sviat.nightlight" target, and two handlers cannot share one. The panel
   // is summoned the standard way, with `omarchy-shell shell toggle
-  // contra.nightlight`.
+  // sviat.nightlight`.
 
   onOpenedChanged: if (opened) {
     root.modeCursor = -1
@@ -120,9 +126,18 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
-      onMoveRequested: function(dx, dy) { if (root.isSetup && dx !== 0) root.moveModeCursor(dx) }
+      onMoveRequested: function(dx, dy) {
+        if (!root.isSetup) return
+        if (dx !== 0) root.moveModeCursor(dx)
+        else root.nudgeTemp(-dy * Model.TEMP_STEP)
+      }
       onActivateRequested: if (root.isSetup) root.activateModeCursor()
-      onTextKey: function(t) { if (root.isSetup && (t === "r" || t === "R")) root.rebuild() }
+      onTextKey: function(t) {
+        if (!root.isSetup) return
+        if (t === "r" || t === "R") root.rebuild()
+        else if (t === "+" || t === "=") root.nudgeTemp(Model.TEMP_STEP)
+        else if (t === "-") root.nudgeTemp(-Model.TEMP_STEP)
+      }
 
       Column {
         id: column
@@ -133,7 +148,7 @@ Panel {
 
         // ---------------------------------------------------------- setup
         // Nothing has been written to the user's configuration at this point.
-        // The disclosure below is `nightlight-auto setup --print` verbatim, so
+        // The disclosure below is `nightlight setup --print` verbatim, so
         // what the button agrees to is exactly what the button then does.
         Column {
           visible: !root.isSetup
@@ -141,7 +156,7 @@ Panel {
           spacing: Style.space(10)
 
           Text {
-            text: "Sunset Night Light"
+            text: "Night Light"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.title
@@ -204,6 +219,29 @@ Panel {
               font.pixelSize: Style.font.display
             }
           }
+
+          // The pill showing the held temperature doubles as a control. The
+          // hero draws it and takes no input, so this sits over its corner.
+          MouseArea {
+            id: pillArea
+            visible: root.mode === "on"
+            anchors.right: parent.right
+            anchors.top: parent.top
+            width: Style.space(72)
+            height: parent.height / 2
+            hoverEnabled: true
+            onWheel: function(wheel) {
+              root.nudgeTemp(wheel.angleDelta.y > 0 ? Model.TEMP_STEP : -Model.TEMP_STEP)
+            }
+            onDoubleClicked: if (root.service) root.service.resetTemp()
+          }
+
+          PanelToolTip {
+            parent: pillArea
+            visible: pillArea.visible && pillArea.containsMouse
+            text: "Scroll to adjust · double-click for " + Model.tempLabel(root.status.nightTemp)
+            fontFamily: root.fontFamily
+          }
         }
 
         Text {
@@ -259,7 +297,50 @@ Panel {
             }
           }
 
+          // On: how warm. The screen follows the knob as it moves, and the
+          // value sticks on release. The track is the tint at each position.
+          Item {
+            visible: root.mode === "on"
+            width: parent.width
+            implicitHeight: tempSlider.implicitHeight
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              height: tempSlider.trackHeight
+              radius: height / 2
+              border.width: 1
+              border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.2)
+              gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: Model.temperatureColor(Model.TEMP_MIN) }
+                GradientStop { position: 0.25; color: Model.temperatureColor(2375) }
+                GradientStop { position: 0.5; color: Model.temperatureColor(3750) }
+                GradientStop { position: 0.75; color: Model.temperatureColor(5125) }
+                GradientStop { position: 1.0; color: Model.temperatureColor(Model.TEMP_MAX) }
+              }
+            }
+
+            PanelSlider {
+              id: tempSlider
+              anchors.fill: parent
+              bar: root.bar
+              minimum: Model.TEMP_MIN
+              maximum: Model.TEMP_MAX
+              step: Model.TEMP_STEP
+              integer: true
+              value: root.manualTemp
+              trackColor: "transparent"
+              fillColor: "transparent"
+              onMoved: function(v) { if (root.service) root.service.previewTemp(Model.snapTemp(v)) }
+              onReleased: function(v) { if (root.service) root.service.commitTemp(Model.snapTemp(v)) }
+              onRightClicked: if (root.service) root.service.resetTemp()
+            }
+          }
+
           Text {
+            visible: root.mode !== "on"
             width: parent.width
             text: Model.modeCaption(root.mode, root.status)
             color: root.dim
