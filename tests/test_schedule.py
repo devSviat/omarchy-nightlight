@@ -4,25 +4,21 @@ shape of the generated ladder.
 Run with:  python3 -m pytest tests/ -q      (or: python3 tests/test_schedule.py)
 """
 
-import importlib.machinery
 import json
-import importlib.util
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_loader(
-    "nightlight_auto",
-    importlib.machinery.SourceFileLoader("nightlight_auto", str(REPO / "bin" / "nightlight-auto")),
-)
-nl = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(nl)
+sys.path.insert(0, str(REPO / "lib"))
+
+from nightlight import conf, ladder, location, paths, solar, status  # noqa: E402
+from nightlight import settings as cfg  # noqa: E402
 
 
 def settings(**overrides):
-    s = dict(nl.DEFAULTS)
+    s = dict(cfg.DEFAULTS)
     s.update(overrides)
     return s
 
@@ -56,7 +52,7 @@ def parse_hhmm(text):
 def test_solar_times_match_almanac():
     for tz_name, lat, lon, day, expect_rise, expect_set in SOLAR_CASES:
         tz = ZoneInfo(tz_name)
-        rise, sets = nl.sun_times(day, lat, lon, tz)
+        rise, sets = solar.sun_times(day, lat, lon, tz)
         assert rise is not None and sets is not None, f"{tz_name} {day}: no events"
         assert rise.date() == day, f"{tz_name} {day}: sunrise landed on {rise.date()}"
         assert sets.date() == day, f"{tz_name} {day}: sunset landed on {sets.date()}"
@@ -71,13 +67,13 @@ def test_polar_day_and_night_report_no_events():
     tz = ZoneInfo("Europe/Oslo")
     # Tromso: the sun neither sets in midsummer nor rises at midwinter.
     for day in (date(2026, 6, 21), date(2026, 12, 21)):
-        rise, sets = nl.sun_times(day, 69.65, 18.96, tz)
+        rise, sets = solar.sun_times(day, 69.65, 18.96, tz)
         assert rise is None and sets is None, f"{day}: expected no events"
 
 
 def test_equator_days_are_near_twelve_hours():
     tz = ZoneInfo("Africa/Nairobi")
-    rise, sets = nl.sun_times(date(2026, 3, 21), -1.2921, 36.8219, tz)
+    rise, sets = solar.sun_times(date(2026, 3, 21), -1.2921, 36.8219, tz)
     length = minutes(sets) - minutes(rise)
     assert 705 <= length <= 735, f"day length {length} min is not near 12 h"
 
@@ -87,24 +83,24 @@ def test_equator_days_are_near_twelve_hours():
 
 def test_iso6709_parsing_handles_both_widths():
     # +DDMM+DDDMM
-    lat, lon = nl._parse_iso6709("-2728+15302")
+    lat, lon = location._parse_iso6709("-2728+15302")
     assert abs(lat - -27.4667) < 0.001
     assert abs(lon - 153.0333) < 0.001
     # +DDMMSS+DDDMMSS
-    lat, lon = nl._parse_iso6709("+404251-0740023")
+    lat, lon = location._parse_iso6709("+404251-0740023")
     assert abs(lat - 40.7142) < 0.001
     assert abs(lon - -74.0064) < 0.001
 
 
 def test_location_comes_from_the_time_zone():
-    lat, lon = nl.location_from_timezone("Australia/Brisbane")
+    lat, lon = location.location_from_timezone("Australia/Brisbane")
     assert -28 < lat < -27
     assert 152 < lon < 154
 
 
 def test_zone_with_several_names_still_resolves():
     # zone1970.tab lists linked names comma-separated on one row.
-    lat, lon = nl.location_from_timezone("Europe/London")
+    lat, lon = location.location_from_timezone("Europe/London")
     assert 51 < lat < 52
 
 
@@ -114,7 +110,7 @@ def test_zone_with_several_names_still_resolves():
 def build(day=date(2026, 8, 22), tz_name="Australia/Brisbane", **overrides):
     tz = ZoneInfo(tz_name)
     s = settings(**overrides)
-    return nl.build_schedule(s, day, -27.4667, 153.0333, tz), s
+    return ladder.build_schedule(s, day, -27.4667, 153.0333, tz), s
 
 
 def test_ladder_ramps_down_to_the_night_temperature():
@@ -179,7 +175,7 @@ def test_curve_is_monotonic_for_any_power():
 def test_unreachable_twilight_falls_back_to_sunset():
     # Reykjavik in June: the sun never gets 18 degrees down.
     tz = ZoneInfo("Atlantic/Reykjavik")
-    _, info = nl.build_schedule(settings(ramp_anchor="astronomical_dusk"),
+    _, info = ladder.build_schedule(settings(ramp_anchor="astronomical_dusk"),
                                 date(2026, 6, 21), 64.1466, -21.9426, tz)
     assert info["anchor_name"] == "sunset"
 
@@ -188,7 +184,7 @@ def test_bad_anchor_and_curve_are_rejected():
     for bad in (dict(ramp_anchor="dinnertime"), dict(ramp_curve_power=0),
                 dict(ramp_curve_power=50)):
         try:
-            nl.validate(settings(**bad))
+            cfg.validate(settings(**bad))
         except SystemExit:
             continue
         raise AssertionError(f"validate accepted {bad}")
@@ -294,7 +290,7 @@ def test_target_is_validated():
     for bad in (dict(full_tint_by="25:00"), dict(full_tint_by="nine"),
                 dict(min_ramp_minutes=0)):
         try:
-            nl.validate(settings(**bad))
+            cfg.validate(settings(**bad))
         except SystemExit:
             continue
         raise AssertionError(f"validate accepted {bad}")
@@ -302,9 +298,9 @@ def test_target_is_validated():
 
 def test_degenerate_location_falls_back_and_is_flagged():
     tz = ZoneInfo("Europe/Oslo")
-    (steps, info) = nl.build_schedule(settings(), date(2026, 6, 21), 69.65, 18.96, tz)
+    (steps, info) = ladder.build_schedule(settings(), date(2026, 6, 21), 69.65, 18.96, tz)
     assert info["degenerate"] is True
-    assert info["sunset"].strftime("%H:%M") == nl.DEFAULTS["fallback_sunset"]
+    assert info["sunset"].strftime("%H:%M") == cfg.DEFAULTS["fallback_sunset"]
     assert len(steps) > 1
 
 
@@ -318,8 +314,8 @@ def test_day_temp_emits_a_temperature_not_identity():
 
 def test_rendered_profiles_are_sorted_and_well_formed():
     (steps, info), s = build()
-    text = nl.render_conf(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
-    assert text.startswith(nl.MARKER)
+    text = conf.render_ladder(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
+    assert text.startswith(paths.MARKER)
     times, bodies = [], []
     block = None
     for line in text.splitlines():
@@ -342,7 +338,7 @@ def test_rendered_profiles_are_sorted_and_well_formed():
 
 
 def test_paused_conf_is_identity_only():
-    text = nl.render_paused_conf("Australia/Brisbane")
+    text = conf.render_hold("Australia/Brisbane", None)
     assert text.count("profile {") == 1
     assert "identity = true" in text
     assert "temperature" not in text
@@ -356,14 +352,14 @@ def test_validate_rejects_nonsense():
                 dict(ramp_minutes=0), dict(step_minutes=0),
                 dict(fallback_sunset="25:00"), dict(round_to_kelvin=0)):
         try:
-            nl.validate(settings(**bad))
+            cfg.validate(settings(**bad))
         except SystemExit:
             continue
         raise AssertionError(f"validate accepted {bad}")
 
 
 def test_validate_accepts_the_defaults():
-    nl.validate(settings())
+    cfg.validate(settings())
 
 
 # ----------------------------------------------------------------- consent
@@ -376,7 +372,7 @@ import shutil
 import subprocess
 import tempfile
 
-CLI = str(REPO / "bin" / "nightlight-auto")
+CLI = str(REPO / "bin" / "nightlight")
 
 
 def sandbox():
@@ -401,18 +397,19 @@ def run_cli(root, *args, stdin=""):
     env = dict(os.environ)
     env["XDG_CONFIG_HOME"] = str(root / "cfg")
     env["XDG_STATE_HOME"] = str(root / "state")
+    env["HOME"] = str(root)
     env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
     env["TZ"] = "Australia/Brisbane"
     return subprocess.run([CLI, *args], capture_output=True, text=True,
                           input=stdin, env=env, timeout=60)
 
 
-def test_generate_refuses_before_consent():
+def test_apply_refuses_before_consent():
     root = sandbox()
     conf = root / "cfg" / "hypr" / "hyprsunset.conf"
     before = conf.read_text()
-    result = run_cli(root, "generate")
-    assert result.returncode != 0, "generate must refuse before setup"
+    result = run_cli(root, "apply")
+    assert result.returncode != 0, "apply must refuse before setup"
     assert "setup" in result.stderr.lower()
     assert conf.read_text() == before, "the user's config was modified anyway"
 
@@ -424,7 +421,7 @@ def test_setup_without_a_tty_refuses_unless_yes():
     result = run_cli(root, "setup")
     assert result.returncode != 0
     assert conf.read_text() == before
-    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+    assert not (root / "state" / "nightlight" / "consent.json").exists()
 
 
 def test_setup_print_changes_nothing():
@@ -435,7 +432,7 @@ def test_setup_print_changes_nothing():
     assert result.returncode == 0
     assert "hyprsunset.conf" in result.stdout
     assert conf.read_text() == before
-    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+    assert not (root / "state" / "nightlight" / "consent.json").exists()
     # and nothing was installed
     assert not (root / "cfg" / "systemd").exists()
 
@@ -449,7 +446,7 @@ def test_status_works_before_consent_and_writes_nothing():
     payload = json.loads(result.stdout)
     assert payload["setup"] is False
     assert conf.read_text() == before
-    assert not (root / "cfg" / "nightlight-auto").exists()
+    assert not (root / "cfg" / "nightlight").exists()
 
 
 def test_setup_then_teardown_restores_the_original_config():
@@ -459,22 +456,22 @@ def test_setup_then_teardown_restores_the_original_config():
 
     result = run_cli(root, "setup", "--yes")
     assert result.returncode == 0, result.stderr
-    assert nl.MARKER in conf.read_text(), "setup did not write the schedule"
-    assert (root / "state" / "nightlight-auto" / "consent.json").exists()
-    assert (root / "cfg" / "systemd" / "user" / "nightlight-auto.timer").exists()
+    assert paths.MARKER in conf.read_text(), "setup did not write the schedule"
+    assert (root / "state" / "nightlight" / "consent.json").exists()
+    assert (root / "cfg" / "systemd" / "user" / "nightlight.timer").exists()
 
     result = run_cli(root, "teardown")
     assert result.returncode == 0, result.stderr
     assert conf.read_text() == original, "teardown did not restore the original file"
-    assert not (root / "cfg" / "systemd" / "user" / "nightlight-auto.timer").exists()
-    assert not (root / "state" / "nightlight-auto" / "consent.json").exists()
+    assert not (root / "cfg" / "systemd" / "user" / "nightlight.timer").exists()
+    assert not (root / "state" / "nightlight" / "consent.json").exists()
     # consent is re-armed
-    assert run_cli(root, "generate").returncode != 0
+    assert run_cli(root, "apply").returncode != 0
 
 
 def test_setup_does_not_clobber_an_existing_settings_file():
     root = sandbox()
-    settings = root / "cfg" / "nightlight-auto" / "config.json"
+    settings = root / "cfg" / "nightlight" / "config.json"
     settings.parent.mkdir(parents=True)
     settings.write_text(json.dumps({"night_temp": 2200}) + "\n")
     assert run_cli(root, "setup", "--yes").returncode == 0
@@ -547,7 +544,7 @@ def test_morning_ramp_never_overlaps_the_evening():
 def test_bad_morning_anchor_is_rejected():
     for bad in ("sunset", "dusk", "civil_dusk", ""):
         try:
-            nl.validate(settings(morning_anchor=bad))
+            cfg.validate(settings(morning_anchor=bad))
         except SystemExit:
             continue
         raise AssertionError(f"validate accepted morning_anchor={bad!r}")
@@ -555,7 +552,7 @@ def test_bad_morning_anchor_is_rejected():
 
 def test_rendered_conf_mentions_the_morning_ramp():
     (steps, info), s = build(morning_anchor="civil_dawn")
-    text = nl.render_conf(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
+    text = conf.render_ladder(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
     assert "civil dawn" in text
 
 
@@ -563,12 +560,12 @@ def test_rendered_conf_mentions_the_morning_ramp():
 
 
 def test_held_conf_on_and_off():
-    off = nl.render_held_conf("Australia/Brisbane", None)
-    on = nl.render_held_conf("Australia/Brisbane", 4000)
-    assert nl.MARKER in off and nl.MARKER in on
+    off = conf.render_hold("Australia/Brisbane", None)
+    on = conf.render_hold("Australia/Brisbane", 4000)
+    assert paths.MARKER in off and paths.MARKER in on
     assert "identity = true" in off and "temperature" not in off.split("profile")[1]
     assert "temperature = 4000" in on and "identity" not in on.split("profile")[1]
-    assert nl.render_paused_conf("Australia/Brisbane") == off
+    assert conf.render_hold("Australia/Brisbane", None) == off
 
 
 def test_on_off_auto_write_the_matching_conf():
@@ -582,15 +579,15 @@ def test_on_off_auto_write_the_matching_conf():
         text = conf.read_text()
         assert text.count("profile {") == 1 and "temperature = 3000" in text
         status = json.loads(run_cli(root, "status", "--json").stdout)
-        assert status["mode"] == "on" and status["paused"] is False
+        assert status["mode"] == "on" and status["manual_temp"] == 3000
 
         assert run_cli(root, "off").returncode == 0
         text = conf.read_text()
         assert text.count("profile {") == 1 and "identity = true" in text
         status = json.loads(run_cli(root, "status", "--json").stdout)
-        assert status["mode"] == "off" and status["paused"] is True
+        assert status["mode"] == "off"
 
-        assert run_cli(root, "resume").returncode == 0
+        assert run_cli(root, "toggle").returncode == 0
         assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "auto"
         assert run_cli(root, "toggle").returncode == 0
         assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "off"
@@ -598,18 +595,6 @@ def test_on_off_auto_write_the_matching_conf():
         assert run_cli(root, "auto").returncode == 0
         assert conf.read_text().count("profile {") > 2
         assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "auto"
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
-
-
-def test_legacy_paused_marker_reads_as_off():
-    root = sandbox()
-    try:
-        assert run_cli(root, "setup", "--yes").returncode == 0
-        (root / "state" / "nightlight-auto").mkdir(parents=True, exist_ok=True)
-        (root / "state" / "nightlight-auto" / "paused").touch()
-        status = json.loads(run_cli(root, "status", "--json").stdout)
-        assert status["mode"] == "off" and status["paused"] is True
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -627,7 +612,7 @@ def test_show_json_describes_the_phases():
         assert data["morning_start"] is None
         assert data["ramp_start"] == data["steps"][0]["time"]
 
-        cfg = root / "cfg" / "nightlight-auto"
+        cfg = root / "cfg" / "nightlight"
         cfg.mkdir(parents=True, exist_ok=True)
         (cfg / "config.json").write_text(json.dumps({"morning_anchor": "civil_dawn"}))
         data = json.loads(run_cli(root, "show", "--json").stdout)
@@ -662,7 +647,7 @@ def test_a_stray_hyprsunset_is_cleared_before_the_unit_starts():
         # And a rebuild that finds a stray copy clears the start limit too.
         flag.touch()
         log.write_text("")
-        assert run_cli(root, "generate", "--force").returncode == 0
+        assert run_cli(root, "apply", "--force").returncode == 0
         calls = log.read_text().splitlines()
         start = calls.index("systemctl --user start hyprsunset.service")
         assert calls.index("pkill -x hyprsunset") < start
@@ -676,22 +661,218 @@ def test_daytime_follows_the_clock_between_day_start_and_the_ramp():
     (_, info), _ = build(day_temp=6000)
     at = lambda h, m: datetime(2026, 8, 22, h, m, tzinfo=tz)
     ds, rs = info["day_start"], info["ramp_start"]
-    assert nl._in_daytime(at(12, 0), info)
-    assert nl._in_daytime(at(ds.hour, ds.minute), info)
-    assert not nl._in_daytime(at(rs.hour, rs.minute), info)
-    assert not nl._in_daytime(at(22, 0), info)
-    assert not nl._in_daytime(at(3, 0), info)
+    assert status.in_daytime(at(12, 0), info)
+    assert status.in_daytime(at(ds.hour, ds.minute), info)
+    assert not status.in_daytime(at(rs.hour, rs.minute), info)
+    assert not status.in_daytime(at(22, 0), info)
+    assert not status.in_daytime(at(3, 0), info)
 
 
 def test_status_and_show_describe_a_tinted_day():
     root = sandbox()
     try:
-        cfg = root / "cfg" / "nightlight-auto"
+        cfg = root / "cfg" / "nightlight"
         cfg.mkdir(parents=True, exist_ok=True)
         (cfg / "config.json").write_text(json.dumps({"day_temp": 6000}))
         status = json.loads(run_cli(root, "status", "--json").stdout)
         assert isinstance(status["daytime"], bool)
         assert json.loads(run_cli(root, "show", "--json").stdout)["day_temp"] == 6000
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ------------------------------------------------------------ manual hold
+
+# On holds a temperature of its own, picked from the panel. Changing it must
+# not restart hyprsunset -- that blanks the tint for a moment -- so these run
+# against a stand-in that answers the way a running hyprsunset does.
+
+
+def fake_hyprsunset(root, time="00:00", temperature=3000, identity=False):
+    """Make the sandbox look like hyprsunset is up under its unit, having read
+    one profile at startup. Returns the log every call to it lands in."""
+    log, bin_dir = root / "calls.log", root / "bin"
+    log.write_text("")
+    (root / "loaded").write_text(
+        f"Time: {time}\nTemperature: {temperature}\nGamma: 1\n"
+        f"Identity: {'true' if identity else 'false'}\n")
+    (bin_dir / "pgrep").write_text("#!/bin/bash\nexit 0\n")
+    (bin_dir / "systemctl").write_text(
+        f'#!/bin/bash\necho "systemctl $*" >> "{log}"\n'
+        'case "$2" in is-active) echo active;; is-enabled) echo enabled;; esac\nexit 0\n')
+    (bin_dir / "hyprctl").write_text(
+        f'#!/bin/bash\necho "hyprctl $*" >> "{log}"\n'
+        f'case "$2 $3" in "profile ") cat "{root / "loaded"}";; '
+        '"temperature ") echo 3000;; *) echo ok;; esac\n')
+    for name in ("pgrep", "systemctl", "hyprctl"):
+        (bin_dir / name).chmod(0o755)
+    return log
+
+
+def calls(log):
+    lines = log.read_text().splitlines()
+    log.write_text("")
+    return lines
+
+
+RESTART = "systemctl --user restart hyprsunset.service"
+
+
+def conf_of(root):
+    return (root / "cfg" / "hypr" / "hyprsunset.conf").read_text()
+
+
+def test_on_takes_a_temperature_and_leaves_the_schedule_alone():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        assert run_cli(root, "on", "3400").returncode == 0
+        assert "temperature = 3400" in conf_of(root)
+        status_ = json.loads(run_cli(root, "status", "--json").stdout)
+        assert status_["manual_temp"] == 3400 and status_["night_temp"] == 3000
+        settings_file = json.loads((root / "cfg" / "nightlight" / "config.json").read_text())
+        assert settings_file["night_temp"] == 3000
+
+        # It is remembered across a trip through the other modes.
+        assert run_cli(root, "auto").returncode == 0
+        assert run_cli(root, "on").returncode == 0
+        assert "temperature = 3400" in conf_of(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_temp_is_stored_but_not_applied_outside_on():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        ladder_conf = conf_of(root)
+        assert run_cli(root, "temp", "2800").returncode == 0
+        assert conf_of(root) == ladder_conf
+        assert run_cli(root, "temp").stdout.strip() == "2800"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_temp_moves_relatively_stops_at_the_limits_and_resets():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        assert run_cli(root, "temp", "+250").returncode == 0
+        assert run_cli(root, "temp").stdout.strip() == "3250"
+        assert run_cli(root, "temp", "-100").returncode == 0
+        assert run_cli(root, "temp").stdout.strip() == "3150"
+        assert run_cli(root, "temp", "-9000").returncode == 0
+        assert run_cli(root, "temp").stdout.strip() == "1000"
+        for bad in ("500", "99999", "warm"):
+            assert run_cli(root, "temp", bad).returncode != 0, bad
+        assert run_cli(root, "temp").stdout.strip() == "1000"
+        assert run_cli(root, "temp", "reset").returncode == 0
+        assert run_cli(root, "temp").stdout.strip() == "3000"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_changing_a_hold_does_not_restart_hyprsunset():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        assert run_cli(root, "on").returncode == 0
+        log = fake_hyprsunset(root, temperature=3000)
+
+        assert run_cli(root, "temp", "3500").returncode == 0
+        seen = calls(log)
+        assert "hyprctl hyprsunset temperature 3500" in seen
+        assert RESTART not in seen
+        assert "temperature = 3500" in conf_of(root), "the config must agree with the screen"
+
+        assert run_cli(root, "off").returncode == 0
+        seen = calls(log)
+        assert "hyprctl hyprsunset identity true" in seen
+        assert RESTART not in seen
+        assert "identity = true" in conf_of(root)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_leaving_auto_restarts_because_a_loaded_ladder_would_overrule_it():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        log = fake_hyprsunset(root, time="18:45", temperature=6500)
+        assert run_cli(root, "on").returncode == 0
+        assert RESTART in calls(log)
+
+        # Even a ladder that happens to have a rung at midnight.
+        assert run_cli(root, "auto").returncode == 0
+        log = fake_hyprsunset(root, time="00:00", temperature=3000)
+        assert run_cli(root, "on").returncode == 0
+        assert RESTART in calls(log)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_the_timer_pass_reloads_a_hold_hyprsunset_only_has_live():
+    # After a live change hyprsunset still has the old profile in memory and
+    # would put it back at midnight. The plain `apply` the timer runs fixes it.
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        assert run_cli(root, "on", "3500").returncode == 0
+        log = fake_hyprsunset(root, temperature=3000)
+        assert run_cli(root, "apply").returncode == 0
+        assert RESTART in calls(log)
+
+        # Once it has the right one loaded, the pass leaves it running.
+        log = fake_hyprsunset(root, temperature=3500)
+        assert run_cli(root, "apply").returncode == 0
+        assert RESTART not in calls(log)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ------------------------------------------------------------------- setup
+
+
+def test_setup_points_the_units_at_this_checkout_and_links_the_cli():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        service = (root / "cfg" / "systemd" / "user" / "nightlight.service").read_text()
+        hook = (root / "cfg" / "omarchy" / "hooks" / "post-boot.d" / "nightlight.sh").read_text()
+        assert f"ExecStart={CLI} apply" in service
+        assert f'"{CLI}" apply' in hook and "@CLI@" not in service + hook
+        link = root / ".local" / "bin" / "nightlight"
+        assert link.is_symlink() and str(link.resolve()) == CLI
+
+        assert run_cli(root, "teardown").returncode == 0
+        assert not link.is_symlink()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_setup_leaves_someone_elses_nightlight_command_alone():
+    root = sandbox()
+    try:
+        theirs = root / ".local" / "bin" / "nightlight"
+        theirs.parent.mkdir(parents=True)
+        theirs.write_text("#!/bin/bash\n")
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        assert run_cli(root, "teardown").returncode == 0
+        assert theirs.read_text() == "#!/bin/bash\n"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_setup_adopts_settings_from_nightlight_auto():
+    root = sandbox()
+    try:
+        legacy = root / "cfg" / "nightlight-auto" / "config.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(json.dumps({"night_temp": 4000}) + "\n")
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        adopted = json.loads((root / "cfg" / "nightlight" / "config.json").read_text())
+        assert adopted == {"night_temp": 4000}
+        assert json.loads(run_cli(root, "status", "--json").stdout)["night_temp"] == 4000
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

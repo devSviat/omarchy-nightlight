@@ -1,8 +1,9 @@
 #!/bin/bash
 
-# Put the plugin and the CLI in place, then hand over to `nightlight-auto setup`,
-# which is where anything that actually changes your desktop gets disclosed and
-# agreed to. Placing files here starts nothing and schedules nothing.
+# For a checkout you want to work from: link it in as the plugin, then hand
+# over to `nightlight setup`, which is where anything that actually changes
+# your desktop gets disclosed and agreed to. Placing files here starts nothing
+# and schedules nothing.
 #
 #   ./install.sh              place files, then run setup interactively
 #   ./install.sh --no-bar     do not add the bar widget to shell.json
@@ -12,10 +13,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ID="contra.nightlight"
+PLUGIN_ID="sviat.nightlight"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
-BIN_DIR="$HOME/.local/bin"
-CLI="$BIN_DIR/nightlight-auto"
 
 add_bar="true"
 place_only="false"
@@ -27,7 +26,7 @@ while (( $# > 0 )); do
   --place-only) place_only="true" ;;
   --yes | -y) assume_yes="--yes" ;;
   -h | --help)
-    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+    sed -n '3,11p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
     exit 0
     ;;
   *)
@@ -40,16 +39,6 @@ done
 
 echo "Placing files from $REPO"
 
-# The CLI. Never clobber something that is not ours.
-mkdir -p "$BIN_DIR"
-if [[ -e $CLI && ! -L $CLI ]]; then
-  echo "  refusing to replace $CLI, which is a real file and not our symlink" >&2
-  exit 1
-fi
-ln -sfn "$REPO/bin/nightlight-auto" "$CLI"
-echo "  cli      $CLI"
-
-# The plugin. A symlink keeps one checkout; a clone works equally well.
 if [[ -e $PLUGIN_DIR && ! -L $PLUGIN_DIR ]]; then
   echo "  plugin   $PLUGIN_DIR already exists and is not a symlink, leaving it"
 else
@@ -72,10 +61,10 @@ fi
 echo
 if [[ $place_only == "true" ]]; then
   echo "Nothing is running yet. When you are ready:"
-  echo "  nightlight-auto setup"
+  echo "  $REPO/bin/nightlight setup"
   exit 0
 fi
 
 # Everything with an effect on the desktop lives behind this, which prints what
 # it would change and waits for you to agree.
-exec "$REPO/bin/nightlight-auto" setup $assume_yes
+exec "$REPO/bin/nightlight" setup $assume_yes

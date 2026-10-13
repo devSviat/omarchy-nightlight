@@ -7,6 +7,9 @@ OnCalendar=*-*-* 03:10:00
 # Again in the afternoon, so a time-zone change made during the day is picked
 # up before that evening's ramp starts.
 OnCalendar=*-*-* 14:10:00
+# And before midnight: a temperature picked from the panel is applied without
+# restarting hyprsunset, which would otherwise put the old one back at 00:00.
+OnCalendar=*-*-* 23:55:00
 Persistent=true
 AccuracySec=1m
 

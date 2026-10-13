@@ -22,12 +22,12 @@ Item {
   readonly property string pluginDir: Model.pluginDirFromUrl(Qt.resolvedUrl("."))
   // Absolute path: the shell's PATH starts with $OMARCHY_PATH/bin, so a bare
   // name would resolve to a packaged command and never reach ours.
-  readonly property string cli: root.pluginDir + "/bin/nightlight-auto"
+  readonly property string cli: root.pluginDir + "/bin/nightlight"
 
   property var status: Model.emptyStatus()
-  property var steps: []
-  // The whole `show --json` payload: steps plus the phase boundaries.
-  property var ladder: ({})
+  // Tonight's steps plus the phase boundaries.
+  readonly property var ladder: status.ladder
+  readonly property var steps: status.ladder.steps || []
   property bool busy: false
 
   readonly property bool ok: status.ok
@@ -36,17 +36,24 @@ Item {
   readonly property bool isSetup: status.setup
   property string disclosure: ""
   readonly property bool running: status.running
-  readonly property bool paused: status.paused
   // "auto" | "on" | "off". on/off are manual holds; auto follows the ladder.
   readonly property string mode: status.mode
-  // "Tinted" means the schedule is actually warming the screen right now, as
-  // opposed to sitting on the untinted day profile.
+
+  // A temperature picked in the panel that the CLI has not reported back yet.
+  // Shown in place of the stored one so every copy of the panel follows the
+  // slider while it moves.
+  property var pendingTemp: null
+  property bool previewing: false
+  readonly property int manualTemp: pendingTemp !== null ? pendingTemp : status.manualTemp
+
+  // "Tinted" means the screen is actually being warmed right now, as opposed
+  // to sitting on the untinted day profile.
   // A numeric day_temp gives the day profile a temperature too, so the day is
   // told apart by the clock (status.daytime), not by the value.
   readonly property bool tinted: status.ok && status.mode !== "off"
                                  && (status.mode === "on"
                                      || (!status.daytime && status.scheduledTemperature !== null))
-  readonly property var temperature: status.mode === "on" ? status.nightTemp
+  readonly property var temperature: status.mode === "on" ? root.manualTemp
                                      : status.mode === "off" ? null
                                      : status.scheduledTemperature
 
@@ -54,9 +61,9 @@ Item {
   readonly property real rampFraction: Model.rampFraction(
     status.scheduledTemperature, status.eveningTemp, status.nightTemp)
 
-  // "day" | "dusk" | "night" | "deep". Consumers map this to a glyph; keeping
-  // the thresholds here means the bar widget and any indicator mark reading
-  // this service can never disagree about which stage we are in.
+  // "day" | "dusk" | "night" | "deep" | "on" | "off". Consumers map this to a
+  // glyph; keeping the thresholds here means the bar widget and any indicator
+  // mark reading this service can never disagree about which stage we are in.
   readonly property string stage: Model.rampStage(root.tinted, root.rampFraction, root.mode)
   readonly property string stageLabel: Model.stageLabel(root.stage)
 
@@ -64,13 +71,19 @@ Item {
 
   function refresh() {
     if (!statusProc.running) statusProc.running = true
-    if (!stepsProc.running) stepsProc.running = true
     if (!root.isSetup && root.disclosure === "" && !disclosureProc.running)
       disclosureProc.running = true
   }
 
+  // One CLI call at a time. A call made while another runs waits its turn, and
+  // only the latest one waits: a burst of slider commits collapses to the last.
+  property var queuedArgs: null
+
   function run(args) {
-    if (root.busy) return
+    if (root.busy) {
+      root.queuedArgs = args
+      return
+    }
     root.busy = true
     actionProc.command = [root.cli].concat(args)
     actionProc.running = true
@@ -80,11 +93,41 @@ Item {
   // disclosure text on screen next to it -- the button IS the consent.
   function acceptSetup() { run(["setup", "--yes"]) }
 
-  function pause() { run(["pause"]) }
-  function resume() { run(["resume"]) }
-  function togglePause() { run(["toggle"]) }
   function setMode(mode) { run([mode === "on" ? "on" : mode === "off" ? "off" : "auto"]) }
-  function rebuild() { run(["generate", "--force"]) }
+  function toggle() { run(["toggle"]) }
+  function rebuild() { run(["apply", "--force"]) }
+
+  // While the slider moves: straight to hyprsunset, which is instant and
+  // writes nothing. The CLI call that makes it stick comes on release.
+  property var liveTemp: null
+
+  function previewTemp(kelvin) {
+    root.previewing = true
+    root.pendingTemp = kelvin
+    root.liveTemp = kelvin
+    pumpLive()
+  }
+
+  function pumpLive() {
+    if (liveProc.running || root.liveTemp === null) return
+    liveProc.command = ["hyprctl", "hyprsunset", "temperature", String(root.liveTemp)]
+    root.liveTemp = null
+    liveProc.running = true
+  }
+
+  function commitTemp(kelvin) {
+    root.previewing = false
+    root.pendingTemp = kelvin
+    run(["temp", String(kelvin)])
+  }
+
+  function nudgeTemp(delta) { commitTemp(Model.clampTemp(root.manualTemp + delta)) }
+
+  function resetTemp() {
+    root.previewing = false
+    root.pendingTemp = status.nightTemp
+    run(["temp", "reset"])
+  }
 
   Process {
     id: statusProc
@@ -93,25 +136,10 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         root.status = Model.parseStatus(text)
+        // Anything still in flight would be overwritten by this older answer.
+        if (!root.previewing && !root.busy && root.queuedArgs === null)
+          root.pendingTemp = null
         root.changed()
-      }
-    }
-  }
-
-  Process {
-    id: stepsProc
-    command: [root.cli, "show", "--json"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(String(text || "").trim())
-          root.steps = (data && data.steps) ? data.steps : []
-          root.ladder = data || ({})
-        } catch (e) {
-          root.steps = []
-          root.ladder = ({})
-        }
       }
     }
   }
@@ -127,11 +155,23 @@ Item {
   }
 
   Process {
+    id: liveProc
+    onExited: root.pumpLive()
+  }
+
+  Process {
     id: actionProc
     onExited: {
       root.busy = false
-      // A pause or rebuild restarts hyprsunset, which takes a moment to come
-      // back and answer, so re-read once it has settled as well as immediately.
+      if (root.queuedArgs !== null) {
+        var next = root.queuedArgs
+        root.queuedArgs = null
+        root.run(next)
+        return
+      }
+      // A mode change or rebuild can restart hyprsunset, which takes a moment
+      // to come back and answer, so re-read once it has settled as well as
+      // immediately.
       Qt.callLater(root.refresh)
       settleTimer.restart()
     }
@@ -145,12 +185,12 @@ Item {
   Component.onCompleted: refresh()
 
   IpcHandler {
-    target: "contra.nightlight"
+    target: "sviat.nightlight"
 
     function status(): string {
       return JSON.stringify({
         setup: root.isSetup,
-        paused: root.paused,
+        mode: root.mode,
         running: root.running,
         temperature: root.temperature,
         tinted: root.tinted
@@ -158,13 +198,13 @@ Item {
     }
 
     function refresh(): void { root.refresh() }
-    function pause(): string { root.pause(); return "paused" }
-    function resume(): string { root.resume(); return "resumed" }
-    function toggle(): string { root.togglePause(); return root.paused ? "resuming" : "pausing" }
+    function toggle(): string { root.toggle(); return root.mode === "off" ? "auto" : "off" }
     function rebuild(): string { root.rebuild(); return "rebuilding" }
     function on(): string { root.setMode("on"); return "on" }
     function off(): string { root.setMode("off"); return "off" }
     function auto(): string { root.setMode("auto"); return "auto" }
     function mode(): string { return root.mode }
+    // Kelvin, or a relative "+100" / "-100".
+    function temp(kelvin: string): string { root.run(["temp", kelvin]); return kelvin }
   }
 }

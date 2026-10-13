@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "contra.nightlight",
-  "name": "Sunset Night Light",
-  "version": "1.1.0",
-  "author": "contra",
+  "id": "sviat.nightlight",
+  "name": "Night Light",
+  "version": "1.0.0",
+  "author": "devSviat",
   "license": "MIT",
-  "description": "Warms the screen on a ramp anchored to real local sunset, deepening through the evening. Rebuilds hyprsunset's schedule daily as sunset moves.",
+  "description": "Warms the screen on a ramp anchored to real local dusk and back to daylight at dawn, with a slider to hold any temperature you like.",
   "kinds": [
     "service",
     "bar-widget"
@@ -15,8 +15,8 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Sunset Night Light",
-    "description": "Tonight's blue-light ramp, anchored to local sunset.",
+    "displayName": "Night Light",
+    "description": "Tonight's blue-light ramp, anchored to local dusk, and a manual hold.",
     "category": "System",
     "aliases": [
       "nightlight",
