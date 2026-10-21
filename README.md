@@ -131,7 +131,21 @@ Adjusting the held temperature, in On:
 | `↑` `↓`, `k` `j`, `+` `-` | 100 K a press |
 | Right-click the slider, or double-click the badge | back to `night_temp` |
 
-Other keys in the panel: `←` `→` / `h` `l` then `Enter` to choose a mode, `r` to rebuild.
+Other keys in the panel: `←` `→` / `h` `l` then `Enter` to choose a mode, `r` to rebuild,
+`s` to show or hide the settings.
+
+### Keyboard tint
+
+On ASUS ROG laptops Omarchy paints the keyboard backlight in the theme's colour. The
+tune button in the panel's footer opens the settings, where **Keyboard → Follow tint**
+warms that colour along with the screen: the theme colour as-is at 6500 K, blended
+towards amber as the screen warms, and almost all amber by about 4000 K. Off, daytime and
+**Theme** give the plain theme colour back.
+
+It is off by default and needs `asusctl`. The keyboard catches up with the evening ramp
+within a minute. While it is on, a `theme-set` hook re-tints the keyboard straight after a
+theme change, because Omarchy paints the plain theme colour at that point. Only the colour
+changes; brightness and the backlight's on/off state are left alone.
 
 ### From a terminal
 
@@ -146,6 +160,7 @@ nightlight off            # hold untinted until `auto`
 nightlight toggle         # off, or back to auto if already off
 nightlight temp           # print the manual temperature
 nightlight temp 3400      # set it; also +100 / -100 / reset
+nightlight keyboard on    # warm the keyboard backlight with the screen; `off` to stop
 nightlight apply          # rebuild now (the timer does this daily)
 nightlight setup --print  # what setup would change, without changing it
 nightlight teardown       # undo everything setup did
@@ -205,6 +220,7 @@ disabled, so it keeps working either way.
 | `morning_anchor` | `null` | `civil_dawn`, `nautical_dawn` or `astronomical_dawn` ramps back to day from there; `null` returns to day in one step at sunrise |
 | `fallback_sunset`, `fallback_sunrise` | `18:00`, `06:00` | Used only where the sun does not rise or set |
 | `round_to_kelvin` | `50` | Rounds emitted temperatures, to keep the file readable |
+| `keyboard_tint` | `false` | Warm the ASUS keyboard backlight with the screen; set from the panel or `nightlight keyboard on` |
 
 Run `nightlight apply` after editing, and `nightlight show` to see the result before
 committing to it.
@@ -294,6 +310,7 @@ hold at its next rung.
 
 ```bash
 python3 tests/test_schedule.py
+python3 tests/test_keyboard.py
 ```
 
 Covers the solar math against published almanac times for Brisbane, London (across a DST
@@ -301,12 +318,15 @@ boundary), New York and Nairobi; polar day and polar night; the ladder's shape, 
 clamping and mired spacing; the rendered config; consent, setup and teardown in a
 throwaway home; the morning ramp; the three modes; and the manual hold against a
 stand-in hyprsunset — that a change is applied live, and when a restart is still needed.
+The keyboard tests cover the colour curve and, against a stand-in `asusctl`, that it is
+only called when the colour changes and that turning the tint off or tearing down hands
+the theme colour back.
 
 ## Requirements
 
 Omarchy 4 (Quattro), `hyprsunset` 0.4 or newer, Python 3.10 or newer. No external Python
 packages and no other dependencies — the solar calculation is stdlib arithmetic.
-`systemd` comes with Omarchy.
+`systemd` comes with Omarchy. Keyboard tint additionally needs `asusctl`.
 
 ## Credits
 

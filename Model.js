@@ -39,6 +39,8 @@ function emptyStatus() {
     eveningTemp: 0,
     nightTemp: 0,
     manualTemp: 0,
+    keyboardTint: false,
+    keyboardAvailable: false,
     ladder: ({})
   }
 }
@@ -70,6 +72,8 @@ function parseStatus(raw) {
     s.eveningTemp = Number(data.evening_temp) || 0
     s.nightTemp = Number(data.night_temp) || 0
     s.manualTemp = Number(data.manual_temp) || s.nightTemp
+    s.keyboardTint = data.keyboard_tint === true
+    s.keyboardAvailable = data.keyboard_available === true
     s.ladder = (data.ladder && typeof data.ladder === "object") ? data.ladder : ({})
     return s
   } catch (e) {

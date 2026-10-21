@@ -96,6 +96,7 @@ Item {
   function setMode(mode) { run([mode === "on" ? "on" : mode === "off" ? "off" : "auto"]) }
   function toggle() { run(["toggle"]) }
   function rebuild() { run(["apply", "--force"]) }
+  function setKeyboardTint(enabled) { run(["keyboard", enabled ? "on" : "off"]) }
 
   // While the slider moves: straight to hyprsunset, which is instant and
   // writes nothing. The CLI call that makes it stick comes on release.
@@ -136,6 +137,9 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         root.status = Model.parseStatus(text)
+        // hyprsunset steps through the ramp on its own clock, with nothing of
+        // ours running, so the keyboard catches up on each poll instead.
+        if (root.status.keyboardTint && !keyboardProc.running) keyboardProc.running = true
         // Anything still in flight would be overwritten by this older answer.
         if (!root.previewing && !root.busy && root.queuedArgs === null)
           root.pendingTemp = null
@@ -152,6 +156,11 @@ Item {
       waitForEnd: true
       onStreamFinished: root.disclosure = String(text || "").trim()
     }
+  }
+
+  Process {
+    id: keyboardProc
+    command: [root.cli, "keyboard", "sync"]
   }
 
   Process {
