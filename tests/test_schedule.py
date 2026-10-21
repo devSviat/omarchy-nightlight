@@ -393,12 +393,13 @@ def sandbox():
     return root
 
 
-def run_cli(root, *args, stdin=""):
+def run_cli(root, *args, stdin="", path=None):
+    """`path` replaces PATH outright instead of putting the stubs in front."""
     env = dict(os.environ)
     env["XDG_CONFIG_HOME"] = str(root / "cfg")
     env["XDG_STATE_HOME"] = str(root / "state")
     env["HOME"] = str(root)
-    env["PATH"] = f"{root / 'bin'}:{env['PATH']}"
+    env["PATH"] = path or f"{root / 'bin'}:{env['PATH']}"
     env["TZ"] = "Australia/Brisbane"
     return subprocess.run([CLI, *args], capture_output=True, text=True,
                           input=stdin, env=env, timeout=60)

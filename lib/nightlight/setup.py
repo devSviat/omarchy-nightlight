@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import conf, hyprsunset, state
+from . import conf, hyprsunset, keyboard, state
 from .apply import apply
 from .location import system_timezone
 from .log import die, info, warn
@@ -201,6 +201,7 @@ def teardown(*, force: bool) -> int:
     _systemctl("daemon-reload")
 
     Path(record.get("hook") or HOOK_PATH).unlink(missing_ok=True)
+    keyboard.remove()
 
     if _link_is_ours():
         BIN_LINK.unlink()

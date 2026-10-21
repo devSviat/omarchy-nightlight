@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import datetime
 
 from . import conf, hyprsunset, state
@@ -96,6 +97,8 @@ def status_payload(tonight: Tonight, now: datetime) -> dict:
         "mode": state.get_mode(),
         "daytime": in_daytime(now, info),
         "setup": state.is_setup(),
+        "keyboard_tint": settings["keyboard_tint"],
+        "keyboard_available": shutil.which("asusctl") is not None,
         "ladder": ladder_payload(tonight, now),
     }
 
@@ -125,5 +128,8 @@ def print_status(tonight: Tonight, payload: dict) -> None:
     else:
         print(f"scheduled   {scheduled}")
         print(f"next        {label(payload['next_temperature'])} at {payload['next_at']}")
+    if payload["keyboard_tint"]:
+        print("keyboard    follows the tint"
+              + ("" if payload["keyboard_available"] else " (asusctl is not installed)"))
     if payload["setup"] and not payload["generated"]:
         warn(f"hyprsunset.conf is not the generated one; run `{APP} apply`")

@@ -20,7 +20,7 @@ import argparse
 import json
 from datetime import date, datetime
 
-from . import setup as setup_, state, status
+from . import keyboard, setup as setup_, state, status
 from .apply import apply, gather
 from .log import info
 from .paths import APP
@@ -92,6 +92,16 @@ def cmd_temp(args) -> int:
     return 0
 
 
+def cmd_keyboard(args) -> int:
+    if args.action == "sync":
+        return keyboard.sync(force=args.force)
+    if args.action in ("on", "off"):
+        return keyboard.set_enabled(args.action == "on")
+    enabled = gather().settings["keyboard_tint"]
+    print("on" if enabled else "off")
+    return 0
+
+
 def cmd_setup(args) -> int:
     if args.print_only:
         print(setup_.disclosure())
@@ -138,6 +148,14 @@ def main() -> int:
     temp.add_argument("kelvin", nargs="?",
                       help="Kelvin, +N / -N, or `reset` to go back to night_temp")
     temp.set_defaults(func=cmd_temp)
+
+    kbd = sub.add_parser("keyboard",
+                         help="warm the ASUS keyboard backlight with the screen")
+    kbd.add_argument("action", nargs="?", choices=("on", "off", "sync"),
+                     help="on / off to choose; sync to repaint now. Prints the choice without one")
+    kbd.add_argument("--force", action="store_true",
+                     help="with sync: repaint even if the colour has not changed")
+    kbd.set_defaults(func=cmd_keyboard)
 
     apply_ = sub.add_parser("apply", help="recompute tonight and load it (the timer does this)")
     apply_.add_argument("--force", action="store_true",

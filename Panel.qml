@@ -13,7 +13,8 @@ import "Model.js" as Model
 //   mode     the one decision made here: Auto, On or Off -- and, for On,
 //            how warm
 //   tonight  the whole ladder as one strip, and when each phase runs
-//   footer   where the sun times come from, and a rebuild action
+//   settings folded away behind the footer's tune button
+//   footer   where the sun times come from, settings, and a rebuild action
 Panel {
   id: root
   moduleName: "sviat.nightlight"
@@ -46,6 +47,7 @@ Panel {
   ]
   // Keyboard cursor on the mode row; -1 until h/l is pressed.
   property int modeCursor: -1
+  property bool settingsOpen: false
 
   function refresh() { if (root.service) root.service.refresh() }
   function rebuild() { if (root.service && !root.busy) root.service.rebuild() }
@@ -69,6 +71,11 @@ Panel {
 
   function activateModeCursor() {
     if (root.modeCursor >= 0) root.setMode(root.modes[root.modeCursor].value)
+  }
+
+  function setKeyboardTint(enabled) {
+    if (!root.service || root.busy || enabled === root.status.keyboardTint) return
+    root.service.setKeyboardTint(enabled)
   }
 
   function nudgeTemp(delta) {
@@ -135,6 +142,7 @@ Panel {
       onTextKey: function(t) {
         if (!root.isSetup) return
         if (t === "r" || t === "R") root.rebuild()
+        else if (t === "s" || t === "S") root.settingsOpen = !root.settingsOpen
         else if (t === "+" || t === "=") root.nudgeTemp(Model.TEMP_STEP)
         else if (t === "-") root.nudgeTemp(-Model.TEMP_STEP)
       }
@@ -556,6 +564,72 @@ Panel {
 
         PanelSeparator { visible: root.isSetup; foreground: root.foreground }
 
+        // ------------------------------------------------------- settings
+        Column {
+          visible: root.isSetup && root.settingsOpen
+          width: parent.width
+          spacing: Style.space(8)
+
+          PanelSectionHeader {
+            text: "Settings"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Item {
+            width: parent.width
+            implicitHeight: keyboardRow.implicitHeight
+
+            Text {
+              anchors.left: parent.left
+              anchors.verticalCenter: keyboardRow.verticalCenter
+              textFormat: Text.PlainText
+              text: "Keyboard"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Row {
+              id: keyboardRow
+              x: Style.space(84)
+              spacing: Style.space(6)
+
+              Repeater {
+                model: [
+                  { tint: false, label: "Theme", hint: "Keep the theme's keyboard colour" },
+                  { tint: true, label: "Follow tint", hint: "Warm the keyboard along with the screen" }
+                ]
+
+                Button {
+                  required property var modelData
+                  text: modelData.label
+                  tooltipText: root.status.keyboardAvailable ? modelData.hint : "Needs asusctl"
+                  selected: root.status.keyboardTint === modelData.tint
+                  bordered: true
+                  enabled: !root.busy && root.status.keyboardAvailable
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.bodySmall
+                  onClicked: root.setKeyboardTint(modelData.tint)
+                }
+              }
+            }
+          }
+
+          Text {
+            visible: !root.status.keyboardAvailable
+            width: parent.width
+            text: "Keyboard tint needs asusctl (ASUS ROG keyboards)."
+            color: root.dim
+            wrapMode: Text.WordWrap
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        PanelSeparator { visible: root.isSetup && root.settingsOpen; foreground: root.foreground }
+
         // --------------------------------------------------------- footer
         Item {
           visible: root.isSetup
@@ -565,7 +639,7 @@ Panel {
           Text {
             id: locationText
             anchors.left: parent.left
-            anchors.right: rebuildButton.left
+            anchors.right: settingsButton.left
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
@@ -574,6 +648,18 @@ Panel {
             elide: Text.ElideRight
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+
+          PanelActionButton {
+            id: settingsButton
+            anchors.right: rebuildButton.left
+            anchors.rightMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: "\u{F062E}"
+            tooltipText: (root.settingsOpen ? "Hide" : "Show") + " settings (s)"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.settingsOpen = !root.settingsOpen
           }
 
           PanelActionButton {

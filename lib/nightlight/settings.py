@@ -54,6 +54,8 @@ DEFAULTS = {
     "fallback_sunrise": "06:00",
     # Round emitted temperatures to this multiple, to keep the file readable.
     "round_to_kelvin": 50,
+    # Warm the ASUS keyboard backlight along with the screen. Needs asusctl.
+    "keyboard_tint": False,
 }
 
 
@@ -100,6 +102,8 @@ def validate(s: dict) -> None:
             assert 0 <= hh < 24 and 0 <= mm < 60
         except (ValueError, AssertionError, AttributeError):
             die(f"full_tint_by must be HH:MM or null (got {s['full_tint_by']!r})")
+    if not isinstance(s["keyboard_tint"], bool):
+        die(f"keyboard_tint must be true or false (got {s['keyboard_tint']!r})")
     if s["min_ramp_minutes"] < 1:
         die("min_ramp_minutes must be at least 1")
     for key in ("fallback_sunset", "fallback_sunrise"):

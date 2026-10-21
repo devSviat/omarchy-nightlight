@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sviat.nightlight",
   "name": "Night Light",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "devSviat",
   "license": "MIT",
   "description": "Warms the screen on a ramp anchored to real local dusk and back to daylight at dawn, with a slider to hold any temperature you like.",
