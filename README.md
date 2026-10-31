@@ -3,7 +3,7 @@
 ![The panel](preview.png)
 
 A night light for Omarchy that follows the sun. The screen warms on a ramp that starts at
-**real local dusk**, deepens through the evening, and climbs back to daylight at dawn.
+**real local sunset**, is fully warm once it is dark, and climbs back to daylight at dawn.
 When you want something else, the panel has a slider: pick any temperature and hold it.
 
 Omarchy's built-in night light is a switch: `Super + Ctrl + N` flips between 4000 K and
@@ -13,24 +13,23 @@ gradually warmer means a ladder of profiles, and a ladder anchored to dusk has t
 rebuilt as dusk moves. That is what this does.
 
 ```
-17:30            sunset — still light out, so nothing happens
-17:54  6500K     civil dusk: the ramp starts at the daytime value
-18:22  6400K     nautical dusk, properly dark now — still imperceptible
-18:56  5750K     the first real warmth
-19:58  4300K
-21:00  3000K     fully warm, at the hour you asked for
+17:30  6500K     sunset: the ramp starts at the daytime value
+17:54  6050K     civil dusk, about when you would reach for a lamp
+18:22  5050K     nautical dusk, properly dark now
+18:49  3000K     astronomical dusk: fully warm
 06:12  untinted  sunrise
 ```
 
-It starts at **dusk rather than sunset**, from the daytime temperature rather than a
-warmer one, and on a curve that holds near neutral early. Sunset is still daylight; a
-filter that becomes visible then reads as firing too early. Nothing here steps — the first
-rung is the value already on screen.
+It starts at **sunset**, from the daytime temperature rather than a warmer one, and on a
+curve that stays faint while there is still light, so the filter never seems to fire too
+early. Nothing here steps — the first rung is the value already on screen.
 
-It finishes at **a clock time you choose**, not after a fixed number of hours. Dusk moves
-by well over an hour across the year, so a fixed duration drifts full tint towards
-midnight in summer. Pinning the end instead means the ramp stretches through winter and
-compresses in summer, and is always fully warm when you want to be winding down.
+It finishes at **astronomical dusk**, not after a fixed number of hours. That is the same
+darkness everywhere and all year, so the ramp suits any latitude: dusk moves by hours
+across the seasons, and a fixed duration or a single clock time would leave the screen
+cool long after dark in winter. `full_tint_latest` caps it at 21:00 for the summer
+evenings when that dusk comes late or never comes. Prefer a fixed hour? Set `full_tint_by`
+to a clock time such as `"20:00"`.
 
 ## Install
 
@@ -209,10 +208,11 @@ disabled, so it keeps working either way.
 | `evening_temp` | `6500` | Kelvin at the start of the ramp. The daytime value, so it begins from no tint |
 | `night_temp` | `3000` | Kelvin at the deepest point |
 | `day_temp` | `null` | `null` means untinted; a number tints the day too |
-| `ramp_anchor` | `civil_dusk` | `sunset`, `civil_dusk`, `nautical_dusk` or `astronomical_dusk` |
-| `full_tint_by` | `"21:00"` | Clock time to reach `night_temp`. `null` uses `ramp_minutes` instead |
+| `ramp_anchor` | `sunset` | `sunset`, `civil_dusk`, `nautical_dusk` or `astronomical_dusk` |
+| `full_tint_by` | `astronomical_dusk` | When to reach `night_temp`: a twilight, or an `HH:MM` clock time. `null` uses `ramp_minutes` instead |
+| `full_tint_latest` | `"21:00"` | Latest clock time for a twilight `full_tint_by`, also used where that twilight never comes. `null` means no limit |
 | `ramp_start_offset_min` | `0` | Minutes relative to the anchor; negative starts earlier |
-| `ramp_minutes` | `300` | Fixed ramp length, used only when `full_tint_by` is `null` |
+| `ramp_minutes` | `300` | Fixed ramp length, used when `full_tint_by` is `null`, or when its twilight never comes and there is no `full_tint_latest` |
 | `min_ramp_minutes` | `45` | Floor, for when dusk falls close to the target |
 | `step_minutes` | `20` | Ladder granularity |
 | `ramp_curve_power` | `2.0` | `1.0` is a straight line; higher holds near daylight longer |
@@ -222,7 +222,8 @@ disabled, so it keeps working either way.
 | `round_to_kelvin` | `50` | Rounds emitted temperatures, to keep the file readable |
 | `keyboard_tint` | `false` | Warm the ASUS keyboard backlight with the screen; set from the panel or `nightlight keyboard on` |
 
-Run `nightlight apply` after editing, and `nightlight show` to see the result before
+Keys missing from your file take these defaults, so a config written by an older version
+keeps its own values. Run `nightlight apply` after editing, and `nightlight show` to see the result before
 committing to it.
 
 **Location comes from your time zone.** tzdata ships a representative latitude and
@@ -235,9 +236,9 @@ want your actual coordinates.
 megakelvin) rather than Kelvin, because even steps there are what read as an even ramp
 to the eye — linear Kelvin steps crowd all the visible change into the warm end. On top
 of that, `ramp_curve_power` biases the movement towards later in the evening, so the
-first hour does very little. Set it to `1.0` for a straight line.
+start of the ramp does very little. Set it to `1.0` for a straight line.
 
-An early-hours `full_tint_by` such as `"01:00"` is taken as the following morning. A time
+An early-hours clock time such as `"01:00"` is taken as the following morning. A time
 that has already passed by the time it gets dark keeps a short ramp rather than inverting
 it.
 

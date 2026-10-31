@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "sviat.nightlight",
   "name": "Night Light",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "devSviat",
   "license": "MIT",
-  "description": "Warms the screen on a ramp anchored to real local dusk and back to daylight at dawn, with a slider to hold any temperature you like.",
+  "description": "Warms the screen from real local sunset until it is dark, and back to daylight at dawn, with a slider to hold any temperature you like.",
   "kinds": [
     "service",
     "bar-widget"
@@ -16,7 +16,7 @@
   },
   "barWidget": {
     "displayName": "Night Light",
-    "description": "Tonight's blue-light ramp, anchored to local dusk, and a manual hold.",
+    "description": "Tonight's blue-light ramp, anchored to the local sun, and a manual hold.",
     "category": "System",
     "aliases": [
       "nightlight",

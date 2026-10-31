@@ -121,17 +121,30 @@ def test_ladder_ramps_down_to_the_night_temperature():
     assert temps == sorted(temps, reverse=True), "ramp must never warm back up"
 
 
-def test_ladder_starts_at_dusk_not_sunset():
-    # Sunset is still daylight. Anything visible then reads as the filter
-    # firing too early, which is the whole reason for the anchor.
+def test_ladder_starts_at_sunset_by_default():
     (steps, info), s = build()
     assert steps[0][0] == info["ramp_start"]
-    assert info["anchor_name"] == "civil_dusk"
-    assert info["ramp_start"] == info["anchor"]  # default offset is zero
-    gap = (info["anchor"] - info["sunset"]).total_seconds() / 60
-    assert 15 <= gap <= 45, f"civil dusk should trail sunset, got {gap} min"
+    assert info["anchor_name"] == "sunset"
+    assert info["ramp_start"] == info["sunset"]  # default offset is zero
     assert steps[-1][1] is None, "last profile should be the untinted day"
     assert steps[-1][0] == info["day_start"]
+
+
+def test_early_tint_stays_faint_while_it_is_still_light():
+    # The default start is daylight, so the curve has to keep it invisible
+    # until around the end of civil twilight.
+    (steps, info), s = build()
+    dusk = solar.sun_times(date(2026, 8, 22), -27.4667, 153.0333,
+                           ZoneInfo("Australia/Brisbane"), -6.0)[1]
+    at_dusk = [temp for when, temp in steps if when <= dusk][-1]
+    assert at_dusk >= s["evening_temp"] - 500, at_dusk
+
+
+def test_civil_dusk_anchor_trails_sunset():
+    (steps, info), s = build(ramp_anchor="civil_dusk")
+    assert info["anchor_name"] == "civil_dusk"
+    gap = (info["anchor"] - info["sunset"]).total_seconds() / 60
+    assert 15 <= gap <= 45, f"civil dusk should trail sunset, got {gap} min"
 
 
 def test_anchor_choice_moves_the_start_later():
@@ -155,8 +168,8 @@ def test_ramp_begins_at_the_daytime_value_so_there_is_no_step():
 
 
 def test_curve_holds_near_the_daytime_value_early():
-    # Half an hour in, nothing should have visibly happened yet.
-    (steps, info), s = build()
+    # Half an hour into a long ramp, nothing should have visibly happened yet.
+    (steps, info), s = build(ramp_anchor="civil_dusk", full_tint_by="21:00")
     thirty_min = info["ramp_start"] + timedelta(minutes=30)
     early = [temp for when, temp in steps
              if temp is not None and when <= thirty_min][-1]
@@ -242,7 +255,7 @@ def test_rounding_stays_within_half_a_quantum():
 
 
 def test_ramp_ends_at_the_target_clock_time():
-    (steps, info), s = build()
+    (steps, info), s = build(full_tint_by="21:00")
     assert info["ramp_end"].strftime("%H:%M") == s["full_tint_by"] == "21:00"
     warm = [(w, temp) for w, temp in steps if temp is not None]
     assert warm[-1][1] == s["night_temp"]
@@ -254,7 +267,7 @@ def test_ramp_length_follows_the_season():
     # here, so a fixed duration would land full tint near midnight in summer.
     lengths = {}
     for day in (date(2026, 6, 21), date(2026, 12, 21)):
-        (_, info), _ = build(day=day)
+        (_, info), _ = build(day=day, ramp_anchor="civil_dusk", full_tint_by="21:00")
         lengths[day] = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
         assert info["ramp_end"].strftime("%H:%M") == "21:00", day
     midwinter, midsummer = lengths[date(2026, 6, 21)], lengths[date(2026, 12, 21)]
@@ -286,14 +299,78 @@ def test_a_target_already_past_at_dusk_keeps_a_short_ramp():
     assert temps == sorted(temps, reverse=True)
 
 
+def test_ramp_ends_at_a_twilight_by_default():
+    # The same altitude every evening, so the tint tracks darkness at any
+    # latitude rather than a clock time that only suits one place.
+    for day in (date(2026, 6, 21), date(2026, 12, 21)):
+        (_, info), s = build(day=day, full_tint_latest=None)
+        dusk = solar.sun_times(day, -27.4667, 153.0333,
+                               ZoneInfo("Australia/Brisbane"), -18.0)[1]
+        assert s["full_tint_by"] == "astronomical_dusk"
+        assert info["ramp_end"] == dusk, day
+
+
+def test_a_twilight_target_stops_at_the_latest_clock_time():
+    (_, info), _ = build(full_tint_latest="18:20")
+    assert info["ramp_end"].strftime("%H:%M") == "18:20"
+
+
+def test_a_passed_latest_time_keeps_a_short_ramp():
+    (_, info), s = build(full_tint_latest="17:00")
+    length = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+    assert length == s["min_ramp_minutes"]
+
+
+def london_midsummer(**overrides):
+    # The sun stays above -18 degrees here, so astronomical dusk does not exist.
+    tz = ZoneInfo("Europe/London")
+    return ladder.build_schedule(settings(**overrides), date(2026, 6, 21),
+                                 51.5074, -0.1278, tz)
+
+
+def test_unreachable_twilight_target_uses_the_latest_time():
+    _, info = london_midsummer(full_tint_latest="23:00")
+    assert info["ramp_end"].strftime("%H:%M") == "23:00"
+
+
+def test_unreachable_twilight_target_without_a_limit_uses_a_fixed_duration():
+    _, info = london_midsummer(full_tint_latest=None, ramp_minutes=120)
+    length = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+    assert length == 120
+
+
+def test_a_sunset_past_midnight_keeps_a_short_ramp():
+    # Reykjavik in June: the evening of the 21st has its sunset on the 22nd, so
+    # 21:00 has already passed, however close the next 21:00 on the calendar is.
+    tz = ZoneInfo("Atlantic/Reykjavik")
+    s = settings(morning_anchor="civil_dawn")
+    _, info = ladder.build_schedule(s, date(2026, 6, 21), 64.15, -21.94, tz)
+    assert info["ramp_start"].date() == date(2026, 6, 22)
+    length = (info["ramp_end"] - info["ramp_start"]).total_seconds() / 60
+    assert length == s["min_ramp_minutes"]
+
+
+def test_an_unused_ramp_length_cannot_break_the_schedule():
+    (_, info), _ = build(full_tint_by="21:00", ramp_minutes=float("inf"))
+    assert info["ramp_end"].strftime("%H:%M") == "21:00"
+
+
 def test_target_is_validated():
     for bad in (dict(full_tint_by="25:00"), dict(full_tint_by="nine"),
+                dict(full_tint_by=["nautical_dusk"]), dict(full_tint_by=21),
+                dict(full_tint_by="sunset"),
+                dict(full_tint_latest="25:00"), dict(full_tint_latest="nautical_dusk"),
                 dict(min_ramp_minutes=0)):
         try:
             cfg.validate(settings(**bad))
         except SystemExit:
             continue
         raise AssertionError(f"validate accepted {bad}")
+
+
+def test_twilight_targets_are_accepted():
+    for good in (dict(full_tint_by="nautical_dusk"), dict(full_tint_latest=None)):
+        cfg.validate(settings(**good))
 
 
 def test_degenerate_location_falls_back_and_is_flagged():
@@ -555,6 +632,16 @@ def test_rendered_conf_mentions_the_morning_ramp():
     (steps, info), s = build(morning_anchor="civil_dawn")
     text = conf.render_ladder(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
     assert "civil dawn" in text
+
+
+def test_rendered_conf_tells_the_morning_start_from_the_dawn():
+    # min_ramp_minutes can start the ramp before dawn; the header must not
+    # print that earlier time as the dawn itself.
+    (steps, info), s = build(morning_anchor="civil_dawn", min_ramp_minutes=120)
+    assert info["morning_start"] < info["morning_anchor"]
+    text = conf.render_ladder(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
+    start, dawn = (info[k].strftime("%H:%M") for k in ("morning_start", "morning_anchor"))
+    assert f"from {start} (civil dawn {dawn})" in text
 
 
 # -------------------------------------------------------------------- modes
