@@ -54,8 +54,9 @@ def render_ladder(steps, settings, info, lat, lon, source, tz_name) -> str:
     if info.get("morning_anchor_name"):
         lines.append(
             f"# morning   : {settings['night_temp']}K -> {settings['evening_temp']}K"
-            f" from {info['morning_anchor_name'].replace('_', ' ')} at"
-            f" {info['morning_start'].strftime('%H:%M')}, day at"
+            f" from {info['morning_start'].strftime('%H:%M')}"
+            f" ({info['morning_anchor_name'].replace('_', ' ')}"
+            f" {info['morning_anchor'].strftime('%H:%M')}), day at"
             f" {info['day_start'].strftime('%H:%M')}")
     lines.append("")
     # hyprsunset treats the profile list as a 24h cycle and wraps past the last

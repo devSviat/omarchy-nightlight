@@ -20,8 +20,6 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
     tomorrow = day + timedelta(days=1)
     sunrise_next, _ = sun_times(tomorrow, lat, lon, tz)
 
-    # The ramp hangs off dusk, not sunset: at sunset it is still light out, and
-    # anything visible then reads as the filter firing too early.
     anchor_name = settings["ramp_anchor"]
     _, anchor = sun_times(day, lat, lon, tz, DUSK_ALTITUDES[anchor_name])
     if anchor is None:
@@ -41,7 +39,7 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
     day_start = sunrise_next + timedelta(minutes=settings["morning_offset_min"])
 
     step = timedelta(minutes=settings["step_minutes"])
-    ramp = _ramp_length(settings, ramp_start, tz)
+    ramp = _ramp_length(settings, ramp_start, day, lat, lon, tz)
 
     # Never let the ramp run into the morning profile.
     latest_end = day_start - step
@@ -67,7 +65,7 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
     for i in range(count + 1):
         # Interpolate in mireds, because even steps there read as even steps to
         # the eye. The power curve then biases the movement towards the later
-        # part of the evening, so the first hour is barely perceptible.
+        # part of the evening, so the start of the ramp is barely perceptible.
         fraction = (i / count) ** power
         kelvin = 1_000_000.0 / (m_start + fraction * (m_end - m_start))
         steps.append((ramp_start + i * (ramp_end - ramp_start) / count,
@@ -131,30 +129,44 @@ def _morning_ramp(settings, tomorrow: date, lat: float, lon: float, tz: ZoneInfo
     return steps, info
 
 
-def _ramp_length(settings, ramp_start: datetime, tz: ZoneInfo) -> timedelta:
+def _ramp_length(settings, ramp_start: datetime, day: date, lat: float, lon: float,
+                 tz: ZoneInfo) -> timedelta:
     """How long the ramp runs for.
 
-    With full_tint_by set, the ramp ends at that clock time, so its length
-    tracks the season: it stretches through winter when dusk is early and
-    compresses in summer when dusk is late, always reaching the floor at the
-    same hour. That is usually what someone means by "warm by nine" -- the hour
-    is about their evening, not about the sun.
+    A twilight target ends the ramp at that solar altitude, so the screen is
+    warm when it is dark at any latitude and in any season. full_tint_latest
+    caps it for evenings when that altitude comes late or never does.
+
+    A clock target ends the ramp at that hour instead, for when "warm by nine"
+    is about someone's evening rather than the sun.
     """
     target = settings["full_tint_by"]
     minimum = timedelta(minutes=settings["min_ramp_minutes"])
     if target is None:
         return timedelta(minutes=settings["ramp_minutes"])
+    if target not in DUSK_ALTITUDES:
+        return _length_to_clock(target, day, ramp_start, minimum)
 
+    latest = settings["full_tint_latest"]
+    limit = _length_to_clock(latest, day, ramp_start, minimum) if latest else None
+    _, dusk = sun_times(day, lat, lon, tz, DUSK_ALTITUDES[target])
+    if dusk is None:
+        return limit or timedelta(minutes=settings["ramp_minutes"])
+    length = max(dusk - ramp_start, minimum)
+    return min(length, limit) if limit else length
+
+
+def _length_to_clock(target: str, day: date, ramp_start: datetime,
+                     minimum: timedelta) -> timedelta:
+    # The target belongs to the evening of `day`, not to ramp_start's date: at
+    # high latitudes in summer the sun sets after midnight.
     hh, mm = (int(part) for part in target.split(":"))
-    end = ramp_start.replace(hour=hh, minute=mm, second=0, microsecond=0)
-    if end <= ramp_start:
-        # An early-hours target means tomorrow; anything else is a target that
-        # has already passed by the time it gets dark, so keep a short ramp
-        # rather than inverting it.
-        if hh < 12:
-            end += timedelta(days=1)
-        else:
-            return minimum
+    end = datetime(day.year, day.month, day.day, hh, mm, tzinfo=ramp_start.tzinfo)
+    # An early-hours target means tomorrow.
+    if hh < 12:
+        end += timedelta(days=1)
+    # A target that has already passed by dark keeps a short ramp rather than
+    # inverting it.
     return max(end - ramp_start, minimum)
 
 

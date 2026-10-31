@@ -200,7 +200,7 @@ function heroMeta(status, tinted, temperature) {
   if (!status.running) return "hyprsunset is not running"
   if (status.mode === "on") return "On until you pick Auto"
   if (status.mode === "off") return "Off until you pick Auto"
-  if (!tinted) return status.nextAt ? ("Starts at dusk · " + status.nextAt) : "Untinted"
+  if (!tinted) return status.nextAt ? ("Warms from " + status.nextAt) : "Untinted"
   var next = status.nextTemperature
   if (temperature !== null && temperature === status.nightTemp)
     return "Warmest · " + (next === null ? "day at " : "brightens at ") + status.nextAt
@@ -211,7 +211,7 @@ function heroMeta(status, tinted, temperature) {
 
 function modeCaption(mode, status) {
   if (mode === "off") return "Held untinted around the clock."
-  return "Warms at dusk, clears at sunrise."
+  return "Warms into the night, clears at sunrise."
 }
 
 // Tonight's two phases, for the rows under the strip.

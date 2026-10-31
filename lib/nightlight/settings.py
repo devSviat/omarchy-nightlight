@@ -24,15 +24,18 @@ DEFAULTS = {
     # null => untinted (hyprsunset identity matrix) during the day.
     "day_temp": None,
     # Where the evening ramp is anchored: "sunset", "civil_dusk",
-    # "nautical_dusk" or "astronomical_dusk". Sunset is still daylight; civil
-    # dusk is about when you reach for a lamp.
-    "ramp_anchor": "civil_dusk",
-    # The clock time by which the screen should be fully warm. The ramp runs
-    # from the anchor to here, so its length follows the season instead of
-    # being fixed: dusk moves by well over an hour across the year, and a fixed
-    # duration would land full tint near midnight in summer. Set it to null to
-    # use ramp_minutes instead.
-    "full_tint_by": "21:00",
+    # "nautical_dusk" or "astronomical_dusk". Sunset is still daylight, but the
+    # curve keeps the start faint and the tint is under way by the time it is
+    # dark; civil dusk is about when you reach for a lamp.
+    "ramp_anchor": "sunset",
+    # When the screen should be fully warm: a twilight ("civil_dusk",
+    # "nautical_dusk", "astronomical_dusk"), which holds at any latitude, or an
+    # HH:MM clock time, for an evening that should end at the same hour all
+    # year. Set it to null to use ramp_minutes instead.
+    "full_tint_by": "astronomical_dusk",
+    # A twilight target's limit, for summers when it comes late or not at all.
+    # null means no limit. Ignored with a clock target.
+    "full_tint_latest": "21:00",
     # Ramp geometry, in minutes.
     "ramp_start_offset_min": 0,   # relative to the anchor; negative starts earlier
     "ramp_minutes": 300,          # only used when full_tint_by is null
@@ -96,23 +99,29 @@ def validate(s: dict) -> None:
     if not (0.1 <= s["ramp_curve_power"] <= 10):
         die(f"ramp_curve_power must be between 0.1 and 10 "
             f"(got {s['ramp_curve_power']})")
-    if s["full_tint_by"] is not None:
-        try:
-            hh, mm = (int(part) for part in s["full_tint_by"].split(":"))
-            assert 0 <= hh < 24 and 0 <= mm < 60
-        except (ValueError, AssertionError, AttributeError):
-            die(f"full_tint_by must be HH:MM or null (got {s['full_tint_by']!r})")
+    target = s["full_tint_by"]
+    twilights = set(DUSK_ALTITUDES) - {"sunset"}
+    if target is not None and not (isinstance(target, str) and target in twilights):
+        if not _is_clock_time(target):
+            die(f"full_tint_by must be HH:MM, one of {', '.join(sorted(twilights))} "
+                f"or null (got {target!r})")
+    if s["full_tint_latest"] is not None and not _is_clock_time(s["full_tint_latest"]):
+        die(f"full_tint_latest must be HH:MM or null (got {s['full_tint_latest']!r})")
     if not isinstance(s["keyboard_tint"], bool):
         die(f"keyboard_tint must be true or false (got {s['keyboard_tint']!r})")
     if s["min_ramp_minutes"] < 1:
         die("min_ramp_minutes must be at least 1")
     for key in ("fallback_sunset", "fallback_sunrise"):
-        try:
-            hh, mm = (int(part) for part in s[key].split(":"))
-            assert 0 <= hh < 24 and 0 <= mm < 60
-        except (ValueError, AssertionError):
+        if not _is_clock_time(s[key]):
             die(f"{key} must be HH:MM (got {s[key]!r})")
 
+
+def _is_clock_time(value) -> bool:
+    try:
+        hh, mm = (int(part) for part in value.split(":"))
+    except (ValueError, AttributeError):
+        return False
+    return 0 <= hh < 24 and 0 <= mm < 60
 
 
 def write_default_settings() -> str | None:
