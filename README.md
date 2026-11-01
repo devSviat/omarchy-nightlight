@@ -143,8 +143,13 @@ towards amber as the screen warms, and almost all amber by about 4000 K. Off, da
 
 It is off by default and needs `asusctl`. The keyboard catches up with the evening ramp
 within a minute. While it is on, a `theme-set` hook re-tints the keyboard straight after a
-theme change, because Omarchy paints the plain theme colour at that point. Only the colour
-changes; brightness and the backlight's on/off state are left alone.
+theme change, because Omarchy paints the plain theme colour at that point.
+
+Only the colour changes. `asusd` re-applies its own stored brightness with every colour, and
+the brightness keys don't update it, so the plugin passes the current level on before it
+paints and within a minute of a key press. While the backlight is off the keyboard isn't
+painted; the colour catches up once it is back on. A theme change in the minute after a
+brightness key press can still return the previous level.
 
 ### From a terminal
 
@@ -320,8 +325,8 @@ clamping and mired spacing; the rendered config; consent, setup and teardown in 
 throwaway home; the morning ramp; the three modes; and the manual hold against a
 stand-in hyprsunset — that a change is applied live, and when a restart is still needed.
 The keyboard tests cover the colour curve and, against a stand-in `asusctl`, that it is
-only called when the colour changes and that turning the tint off or tearing down hands
-the theme colour back.
+only called when the colour changes, that a brightness set with the keys survives a repaint
+and that turning the tint off or tearing down hands the theme colour back.
 
 ## Requirements
 
