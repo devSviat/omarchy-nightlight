@@ -27,6 +27,6 @@
       "colour temperature"
     ],
     "allowMultiple": false,
-    "defaultSection": "center"
+    "defaultSection": "centerEnd"
   }
 }

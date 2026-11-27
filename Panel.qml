@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -35,9 +36,9 @@ Panel {
   readonly property var temperature: service ? service.temperature : null
   readonly property string mode: root.status.mode
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property var modes: [
@@ -164,6 +165,7 @@ Panel {
           spacing: Style.space(10)
 
           Text {
+            textFormat: Text.PlainText
             text: "Night Light"
             color: root.foreground
             font.family: root.fontFamily
@@ -174,6 +176,7 @@ Panel {
           PanelSeparator { foreground: root.foreground }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: "Not set up yet. Nothing on this machine has been changed."
             color: root.foreground
@@ -184,6 +187,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             text: root.service && root.service.disclosure !== ""
                   ? root.service.disclosure
@@ -253,6 +257,7 @@ Panel {
         }
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: root.isSetup && root.status.ok && !root.status.running
           text: "Nothing is applied. Start it with: systemctl --user start hyprsunset"
@@ -348,6 +353,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: root.mode !== "on"
             width: parent.width
             text: Model.modeCaption(root.mode, root.status)
@@ -552,6 +558,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             width: parent.width
             visible: root.status.estimated
             text: "The sun does not set here today; using the fallback times."
@@ -618,6 +625,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: !root.status.keyboardAvailable
             width: parent.width
             text: "Keyboard tint needs asusctl (ASUS ROG keyboards)."
