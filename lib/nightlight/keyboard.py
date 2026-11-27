@@ -33,6 +33,7 @@ FULL_WARM_KELVIN = 3700
 AMBER = ((4000, (255, 154, 60)), (2500, (255, 106, 16)), (1000, (255, 60, 0)))
 
 HEX = re.compile(r"^#?([0-9a-fA-F]{6})$")
+LEVEL = re.compile(r"brightness:\s*(off|low|med|high)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def available() -> bool:
@@ -124,9 +125,13 @@ def _painted(theme: str, color: str) -> dict:
     return {"theme": theme, "color": color, "boot": _boot_id()}
 
 
-def _remember(theme: str, color: str) -> None:
+def _is_painted(last: dict, theme: str, color: str) -> bool:
+    return all(last.get(key) == value for key, value in _painted(theme, color).items())
+
+
+def _remember(record: dict) -> None:
     KEYBOARD_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    KEYBOARD_STATE_PATH.write_text(json.dumps(_painted(theme, color)) + "\n")
+    KEYBOARD_STATE_PATH.write_text(json.dumps(record) + "\n")
 
 
 @contextmanager
@@ -140,15 +145,43 @@ def _exclusive():
         yield
 
 
-def _paint(color: str) -> bool:
+def _asusctl(*args: str) -> subprocess.CompletedProcess | None:
     try:
-        result = subprocess.run(["asusctl", "aura", "effect", "static", "-c", color],
-                                capture_output=True, text=True, timeout=10)
+        return subprocess.run(["asusctl", *args], capture_output=True, text=True, timeout=10)
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _read_level() -> str | None:
+    result = _asusctl("leds", "get")
+    if result is None or result.returncode != 0:
+        return None
+    match = LEVEL.search(result.stdout)
+    return match.group(1).lower() if match else None
+
+
+def _set_level(level: str) -> bool:
+    result = _asusctl("leds", "set", level)
+    if result is None:
+        return False
+    if result.returncode != 0:
+        warn(f"asusctl could not set the keyboard brightness: {result.stderr.strip()}")
+    return result.returncode == 0
+
+
+def _paint(color: str, level: str | None) -> bool:
+    """Every effect makes asusd re-apply its stored brightness, and the Fn keys
+    never reach asusd, so it hears the level first. Stored Off still comes back
+    as Med, which only setting it again afterwards undoes."""
+    if level is not None and level != "off":
+        _set_level(level)
+    result = _asusctl("aura", "effect", "static", "-c", color)
+    if result is None:
         return False
     if result.returncode != 0:
         warn(f"asusctl could not set the keyboard colour: {result.stderr.strip()}")
-    return result.returncode == 0
+        return False
+    return level != "off" or _set_level(level)
 
 
 def sync(*, force: bool = False) -> int:
@@ -158,7 +191,8 @@ def sync(*, force: bool = False) -> int:
 
 def _sync(*, force: bool) -> int:
     """Bring the keyboard in line with the screen. Called every minute by the
-    panel, so it talks to asusctl only when the colour actually changes.
+    panel, so it paints only when the colour actually changes, and passes on a
+    brightness changed with the Fn keys so Omarchy's own paint cannot reset it.
 
     `force` repaints even if nothing changed here: after a theme switch Omarchy
     has just painted the plain theme colour over ours."""
@@ -172,10 +206,20 @@ def _sync(*, force: bool) -> int:
         restore()
         return 0
     color = tinted_color(theme, screen_temperature(tonight, datetime.now(tonight.tz)))
-    if not force and _last_applied() == _painted(theme, color):
+    last = _last_applied()
+    level = _read_level()
+    # Omarchy's paint lights a dark keyboard at Med; any other level was set by hand.
+    if force and last.get("level") == "off" and level == "med":
+        level = "off"
+
+    # Painting a dark keyboard would flash it on; the colour waits until it is lit.
+    if level != "off" and (force or not _is_painted(last, theme, color)):
+        if _paint(color, level):
+            _remember({**_painted(theme, color), "level": level})
         return 0
-    if _paint(color):
-        _remember(theme, color)
+    if level is not None and (force or level != last.get("level")) and _set_level(level):
+        # Omarchy painted over ours, and a same-colour theme must still re-tint later.
+        _remember({"level": level} if force else {**last, "level": level})
     return 0
 
 
@@ -188,7 +232,7 @@ def restore() -> None:
     theme = theme_color()
     if theme is None or not available():
         return
-    if last.get("color") == theme or _paint(theme):
+    if last.get("color") in (None, theme) or _paint(theme, _read_level()):
         KEYBOARD_STATE_PATH.unlink(missing_ok=True)
 
 

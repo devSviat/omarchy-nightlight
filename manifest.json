@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "sviat.nightlight",
   "name": "Night Light",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "devSviat",
   "license": "MIT",
   "description": "Warms the screen from real local sunset until it is dark, and back to daylight at dawn, with a slider to hold any temperature you like.",
@@ -27,6 +27,6 @@
       "colour temperature"
     ],
     "allowMultiple": false,
-    "defaultSection": "center"
+    "defaultSection": "centerEnd"
   }
 }

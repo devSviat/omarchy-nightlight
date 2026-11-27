@@ -6,6 +6,7 @@ Run with:  python3 tests/test_keyboard.py
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -52,9 +53,32 @@ def test_below_full_warm_only_the_amber_deepens():
 # --------------------------------------------------------------------- cli
 
 
+ASUSD_STUB = """#!/bin/bash
+root="@ROOT@"
+echo "$*" >> "$root/asusctl.log"
+case "$1 $2" in
+  "leds get")
+    level=$(cat "$root/hardware.level")
+    echo "Current keyboard led brightness: ${level^}"
+    ;;
+  "leds set")
+    echo "$3" > "$root/hardware.level"
+    echo "$3" > "$root/stored.level"
+    ;;
+  "aura effect")
+    if [[ $(cat "$root/stored.level") == off ]]; then
+      echo med > "$root/stored.level"
+    fi
+    cp "$root/stored.level" "$root/hardware.level"
+    ;;
+esac
+"""
+
+
 def keyboard_sandbox():
     """A set-up sandbox with a theme colour, held On at 4000K, and an asusctl
-    that logs what it is asked to paint."""
+    that logs its calls and keeps brightness the way asusd does: its own stored
+    level, re-applied by every effect, apart from the level in the hardware."""
     root = sandbox()
     theme_file = root / "state" / "omarchy" / "current" / "theme" / "keyboard.rgb"
     theme_file.parent.mkdir(parents=True)
@@ -62,17 +86,38 @@ def keyboard_sandbox():
     log = root / "asusctl.log"
     log.write_text("")
     asusctl = root / "bin" / "asusctl"
-    asusctl.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n')
+    asusctl.write_text(ASUSD_STUB.replace("@ROOT@", str(root)))
     asusctl.chmod(0o755)
+    (root / "hardware.level").write_text("med\n")
+    (root / "stored.level").write_text("med\n")
     assert run_cli(root, "setup", "--yes").returncode == 0
     assert run_cli(root, "on", "4000").returncode == 0
     return root, log
 
 
 def painted(log):
-    lines = [line.split()[-1] for line in log.read_text().splitlines()]
+    lines = [line.split()[-1] for line in log.read_text().splitlines()
+             if line.startswith("aura effect")]
     log.write_text("")
     return lines
+
+
+def press_brightness_key(root, level):
+    """The Fn keys go through brightnessctl: the hardware moves, asusd is not told."""
+    (root / "hardware.level").write_text(f"{level}\n")
+
+
+def hardware_level(root):
+    return (root / "hardware.level").read_text().strip()
+
+
+def stored_level(root):
+    return (root / "stored.level").read_text().strip()
+
+
+def omarchy_paints_the_theme(root):
+    subprocess.run([str(root / "bin" / "asusctl"), "aura", "effect", "static", "-c", THEME],
+                   check=True)
 
 
 def hook_of(root):
@@ -166,6 +211,125 @@ def test_a_failed_hand_back_is_retried_by_the_next_sync():
         assert painted(log) == [THEME]
         assert run_cli(root, "keyboard", "sync").returncode == 0
         assert painted(log) == []
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_new_colour_keeps_the_level_set_with_the_keys():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        painted(log)
+        press_brightness_key(root, "low")
+        assert run_cli(root, "temp", "3000").returncode == 0
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert painted(log) == [keyboard.tinted_color(THEME, 3000)]
+        assert hardware_level(root) == "low"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_each_sync_tells_asusd_once_about_a_new_level():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "high")
+        log.write_text("")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert stored_level(root) == "high"
+        assert "leds set high" in log.read_text() and painted(log) == []
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert "leds set" not in log.read_text()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_theme_change_keeps_a_level_already_passed_to_asusd():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "low")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        omarchy_paints_the_theme(root)
+        assert run_cli(root, "keyboard", "sync", "--force").returncode == 0
+        assert hardware_level(root) == "low"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_dark_keyboard_is_not_painted_until_it_is_lit_again():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "off")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        painted(log)
+        assert run_cli(root, "temp", "3000").returncode == 0
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert painted(log) == [] and hardware_level(root) == "off"
+
+        press_brightness_key(root, "low")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert painted(log) == [keyboard.tinted_color(THEME, 3000)]
+        assert hardware_level(root) == "low"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_theme_change_leaves_a_dark_keyboard_dark_and_retints_it_later():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "off")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        omarchy_paints_the_theme(root)
+        assert hardware_level(root) == "med", "the stub should light it, as asusd does"
+        painted(log)
+        assert run_cli(root, "keyboard", "sync", "--force").returncode == 0
+        assert painted(log) == [] and hardware_level(root) == "off"
+
+        press_brightness_key(root, "low")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert painted(log) == [keyboard.tinted_color(THEME, 4000)]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_forced_sync_keeps_a_keyboard_lit_by_hand_since_the_last_sync():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "off")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        press_brightness_key(root, "low")
+        assert run_cli(root, "keyboard", "sync", "--force").returncode == 0
+        assert hardware_level(root) == "low"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_handing_the_colour_back_leaves_a_dark_keyboard_dark():
+    root, log = keyboard_sandbox()
+    try:
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        press_brightness_key(root, "off")
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        painted(log)
+        assert run_cli(root, "keyboard", "off").returncode == 0
+        assert painted(log) == [THEME] and hardware_level(root) == "off"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_an_unreadable_level_does_not_stop_the_tint():
+    root, log = keyboard_sandbox()
+    try:
+        asusctl = root / "bin" / "asusctl"
+        asusctl.write_text(f'#!/bin/bash\necho "$*" >> "{log}"\n')
+        assert run_cli(root, "keyboard", "on").returncode == 0
+        assert painted(log) == [keyboard.tinted_color(THEME, 4000)]
+        assert run_cli(root, "keyboard", "sync").returncode == 0
+        assert "leds set" not in log.read_text() and painted(log) == []
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
